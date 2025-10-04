@@ -5,10 +5,26 @@
 # Repository: https://github.com/mdmattsson/syskit
 # Website: https://www.syskit.org
 
+
 set -eE
 
+ERROR_LOG="/tmp/syskit-error-$$.log"
+
 error_handler() {
+    {
+        echo "================================"
+        echo "ERROR: Installation failed"
+        echo "Line: $1"
+        echo "Command: $BASH_COMMAND"
+        echo "Exit code: $?"
+        echo "Time: $(date)"
+        echo "================================"
+    } >> "$ERROR_LOG"
+    
+    # Also try to output to console (might get cleared)
     echo "ERROR: Installation failed at line $1" >&2
+    echo "Check $ERROR_LOG for details" >&2
+    
     exit 1
 }
 
