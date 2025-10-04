@@ -237,22 +237,28 @@ uninstall_syskit() {
     # Remove symlinks from both possible bin directories
     for bin_dir in "$HOME/.local/bin" "$HOME/bin"; do
         if [[ -d "$bin_dir" ]]; then
-            echo "Removing symlinks from $bin_dir..."
+            echo "Checking for symlinks in $bin_dir..."
             
-            # Remove main syskit symlink
+            # Remove main syskit symlink (check if it points to our installation)
             if [[ -L "$bin_dir/syskit" ]]; then
-                rm "$bin_dir/syskit"
-                echo "  Removed syskit"
+                local link_target=$(readlink "$bin_dir/syskit")
+                if [[ "$link_target" == "$EXPECTED_DIR/syskit.sh" ]]; then
+                    rm "$bin_dir/syskit"
+                    echo "  Removed syskit"
+                fi
             fi
 
-            # Remove utility script symlinks
+            # Remove utility script symlinks (only if they point to our installation)
             if [[ -d "$EXPECTED_DIR/utility_scripts" ]]; then
                 for script in "$EXPECTED_DIR/utility_scripts"/*.sh; do
                     [[ -f "$script" ]] || continue
                     local name=$(basename "$script" .sh)
                     if [[ -L "$bin_dir/$name" ]]; then
-                        rm "$bin_dir/$name"
-                        echo "  Removed $name"
+                        local link_target=$(readlink "$bin_dir/$name")
+                        if [[ "$link_target" == "$script" ]]; then
+                            rm "$bin_dir/$name"
+                            echo "  Removed $name"
+                        fi
                     fi
                 done
             fi
