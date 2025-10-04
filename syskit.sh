@@ -6,7 +6,6 @@
 # Website: https://www.syskit.org
 
 set -e
-trap cleanup EXIT
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -285,6 +284,9 @@ cleanup() {
     tput sgr0
     clear
 }
+
+trap cleanup EXIT
+
 
 init_terminal() {
     tput civis
