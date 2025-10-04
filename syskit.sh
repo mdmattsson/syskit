@@ -31,20 +31,19 @@ check_installation() {
     if [[ "$SCRIPT_DIR" == "$EXPECTED_DIR" ]]; then
         return 0
     fi
-    
+
     # Check if already installed but running from different location
     if [[ -d "$EXPECTED_DIR/.git" ]]; then
         echo "SysKit is installed at $EXPECTED_DIR"
         echo "Please run: syskit (or $HOME/.local/bin/syskit)"
         exit 0
     fi
-    
+
     # Not installed - offer to install
     echo "SysKit is not installed."
-    echo "Would you like to install it now? [Y/n]: "
-    read -n 1 -r
+    read -p "Would you like to install it now? [Y/n]: " -r < /dev/tty
     echo
-    
+
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         install_syskit
     else
@@ -60,7 +59,7 @@ install_syskit() {
     echo "Installing SysKit..."
     
     local REPO_URL="https://github.com/mdmattsson/syskit.git"
-    
+
     # Determine bin directory
     if [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
         BIN_DIR="$HOME/.local/bin"
@@ -69,12 +68,33 @@ install_syskit() {
     else
         BIN_DIR="$HOME/.local/bin"
     fi
-    
+
+    # Check PATH and add to .bashrc if needed
+    if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+        echo ""
+        echo "WARNING: $BIN_DIR is not in your PATH"
+        read -p "Add $BIN_DIR to your PATH automatically? [Y/n]: " -r < /dev/tty
+        echo
+
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            echo "" >> ~/.bashrc
+            echo "# Added by SysKit installer" >> ~/.bashrc
+            echo "export PATH=\"$BIN_DIR:\$PATH\"" >> ~/.bashrc
+            echo "Added to ~/.bashrc"
+            echo "Run 'source ~/.bashrc' or restart your shell"
+            export PATH="$BIN_DIR:$PATH"  # Add to current session too
+        else
+            echo "You can manually add this to your ~/.bashrc:"
+            echo "  export PATH=\"$BIN_DIR:\$PATH\""
+        fi
+        echo ""
+    fi    
+
     # Check for git
     if ! command -v git &>/dev/null; then
         echo "Git is required but not installed."
         echo "Attempting to install git..."
-        
+
         if [[ "$OSTYPE" == "linux-gnu"* ]]; then
             if command -v apt &>/dev/null; then
                 sudo apt update && sudo apt install -y git
@@ -100,26 +120,26 @@ install_syskit() {
             echo "Please install git manually for your platform."
             exit 1
         fi
-        
+
         # Verify git installed
         if ! command -v git &>/dev/null; then
             echo "Git installation failed."
             exit 1
         fi
     fi
-    
+
     # Clone repository
     echo "Cloning SysKit repository to $EXPECTED_DIR..."
     git clone "$REPO_URL" "$EXPECTED_DIR"
-    
+
     # Create bin directory
     mkdir -p "$BIN_DIR"
-    
+
     # Create symlink for main script
     echo "Creating symlink at $BIN_DIR/syskit..."
     ln -sf "$EXPECTED_DIR/syskit.sh" "$BIN_DIR/syskit"
     chmod +x "$EXPECTED_DIR/syskit.sh"
-    
+
     # Create symlinks for utility scripts
     if [[ -d "$EXPECTED_DIR/utility_scripts" ]]; then
         echo "Creating symlinks for utility scripts..."
@@ -130,7 +150,7 @@ install_syskit() {
             chmod +x "$script"
         done
     fi
-    
+
     # Check PATH
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
         echo ""
@@ -139,13 +159,13 @@ install_syskit() {
         echo "  export PATH=\"$BIN_DIR:\$PATH\""
         echo ""
     fi
-    
+
     echo ""
     echo "✓ SysKit installed successfully!"
     echo ""
     echo "Starting SysKit..."
     sleep 2
-    
+
     # Re-exec from installed location
     exec "$EXPECTED_DIR/syskit.sh" "$@"
 }
@@ -154,7 +174,75 @@ install_syskit() {
 check_installation
 
 
+# Uninstall function
+uninstall_syskit() {
+    echo "=== SysKit Uninstaller ==="
+    echo ""
+    echo "This will remove:"
+    echo "  - $EXPECTED_DIR (configuration and scripts)"
+    echo "  - Symlinks in ~/.local/bin and ~/bin"
+    echo ""
+    read -p "Are you sure you want to uninstall SysKit? [y/N]: " -r < /dev/tty
+    echo
 
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Uninstall cancelled."
+        return 0
+    fi
+
+    # Remove symlinks from both possible bin directories
+    for bin_dir in "$HOME/.local/bin" "$HOME/bin"; do
+        if [[ -d "$bin_dir" ]]; then
+            echo "Removing symlinks from $bin_dir..."
+            
+            # Remove main syskit symlink
+            if [[ -L "$bin_dir/syskit" ]]; then
+                rm "$bin_dir/syskit"
+                echo "  Removed syskit"
+            fi
+
+            # Remove utility script symlinks
+            if [[ -d "$EXPECTED_DIR/utility_scripts" ]]; then
+                for script in "$EXPECTED_DIR/utility_scripts"/*.sh; do
+                    [[ -f "$script" ]] || continue
+                    local name=$(basename "$script" .sh)
+                    if [[ -L "$bin_dir/$name" ]]; then
+                        rm "$bin_dir/$name"
+                        echo "  Removed $name"
+                    fi
+                done
+            fi
+        fi
+    done
+
+    # Ask about configuration backup
+    if [[ -d "$CONFIG_DIR" ]]; then
+        echo ""
+        read -p "Backup configuration files before removing? [Y/n]: " -r < /dev/tty
+        echo
+        
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            local backup_file="$HOME/syskit-config-backup-$(date +%Y%m%d_%H%M%S).tar.gz"
+            tar -czf "$backup_file" -C "$EXPECTED_DIR" cfg 2>/dev/null || true
+            if [[ -f "$backup_file" ]]; then
+                echo "Configuration backed up to: $backup_file"
+            fi
+        fi
+    fi
+
+    # Remove installation directory
+    echo ""
+    echo "Removing $EXPECTED_DIR..."
+    rm -rf "$EXPECTED_DIR"
+
+    echo ""
+    echo "SysKit uninstalled successfully!"
+    echo ""
+    echo "To reinstall, run:"
+    echo "  curl -fsSL https://raw.githubusercontent.com/mdmattsson/syskit/main/syskit.sh | bash"
+
+    exit 0
+}
 
 #
 # MENU MODE:
@@ -1457,6 +1545,28 @@ handle_input() {
 
 # Main function
 main() {
+
+    # Handle command-line arguments
+    case "${1:-}" in
+        --uninstall)
+            uninstall_syskit
+            ;;
+        --version)
+            echo "SysKit v$VERSION"
+            exit 0
+            ;;
+        --help)
+            echo "SysKit - Advanced Linux System Setup"
+            echo "Usage: syskit [options]"
+            echo ""
+            echo "Options:"
+            echo "  --uninstall    Remove SysKit from system"
+            echo "  --version      Show version information"
+            echo "  --help         Show this help"
+            exit 0
+            ;;
+    esac
+
     load_config
     load_theme
     init_terminal
