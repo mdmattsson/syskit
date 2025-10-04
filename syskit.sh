@@ -1598,6 +1598,8 @@ handle_input() {
 
 # Main function
 main() {
+    # Reset terminal to sane state (important after exec)
+    stty sane 2>/dev/null || true
 
     # Handle command-line arguments
     case "${1:-}" in
