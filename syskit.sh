@@ -79,6 +79,9 @@ check_installation() {
 
 # Installation function
 install_syskit() {
+    # Disable error trap during installation so we can handle errors properly
+    trap - ERR
+
     echo "Installing SysKit..."
     
     local REPO_URL="https://github.com/mdmattsson/syskit.git"
@@ -151,9 +154,30 @@ install_syskit() {
         fi
     fi
 
-    # Clone repository
-    echo "Cloning SysKit repository to $EXPECTED_DIR..."
-    git clone "$REPO_URL" "$EXPECTED_DIR"
+    # Handle existing installation directory
+    if [[ -d "$EXPECTED_DIR" ]]; then
+        if [[ -d "$EXPECTED_DIR/.git" ]]; then
+            echo "Existing installation found. Updating..."
+            cd "$EXPECTED_DIR"
+            git pull origin main || {
+                echo "ERROR: Git pull failed. Removing and reinstalling..."
+                cd ~
+                rm -rf "$EXPECTED_DIR"
+            }
+        else
+            echo "Incomplete installation found. Removing..."
+            rm -rf "$EXPECTED_DIR"
+        fi
+    fi
+
+    # Clone repository only if directory doesn't exist or was removed
+    if [[ ! -d "$EXPECTED_DIR" ]]; then
+        echo "Cloning SysKit repository to $EXPECTED_DIR..."
+        git clone "$REPO_URL" "$EXPECTED_DIR" || {
+            echo "ERROR: Git clone failed!"
+            exit 1
+        }
+    fi
 
     # Create bin directory
     mkdir -p "$BIN_DIR"
