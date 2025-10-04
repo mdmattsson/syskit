@@ -214,11 +214,11 @@ install_syskit() {
     echo ""
     echo "✓ SysKit installed successfully!"
     echo ""
-    echo "Starting SysKit..."
-    sleep 2
-
+    echo "Run 'syskit' to start"
+    
+    #sleep 2
     # Re-exec from installed location with original arguments
-    exec "$EXPECTED_DIR/syskit.sh" "$@"
+    #exec "$EXPECTED_DIR/syskit.sh" "$@"
 }
 
 
