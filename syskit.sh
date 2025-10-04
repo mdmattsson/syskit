@@ -5,7 +5,15 @@
 # Repository: https://github.com/mdmattsson/syskit
 # Website: https://www.syskit.org
 
-#set -e
+set -eE
+
+error_handler() {
+    echo "ERROR: Installation failed at line $1" >&2
+    exit 1
+}
+
+trap 'error_handler $LINENO' ERR
+
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
