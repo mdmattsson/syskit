@@ -12,6 +12,16 @@ set -e
 # This gets removed after installation completes
 ERROR_LOG="/tmp/syskit-error-$$.log"
 
+
+# Resolve symlinks to get actual script location
+if [[ -L "${BASH_SOURCE[0]}" ]]; then
+    SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+else
+    SCRIPT_PATH="${BASH_SOURCE[0]}"
+fi
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+
+
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 USERS_HOME=$HOME
