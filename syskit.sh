@@ -215,6 +215,10 @@ install_syskit() {
     echo "✓ SysKit installed successfully!"
     echo ""
     echo "Run 'syskit' to start"
+
+    # Disable error trap before exiting
+    trap - ERR
+    set +e
     # Exit cleanly - let user run syskit themselves
     exit 0
 
