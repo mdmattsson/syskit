@@ -44,7 +44,7 @@ check_installation() {
     echo
 
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        install_syskit
+        install_syskit "$@" # Pass arguments through
     else
         echo "Installation cancelled."
         echo "To install later, run:"
@@ -165,7 +165,7 @@ install_syskit() {
     echo "Starting SysKit..."
     sleep 2
 
-    # Re-exec from installed location
+    # Re-exec from installed location with original arguments
     exec "$EXPECTED_DIR/syskit.sh" "$@"
 }
 
@@ -1566,8 +1566,8 @@ main() {
             ;;
     esac
 
-    # check installation (after handling flags)
-    check_installation
+    # check installation, passing all arguments
+    check_installation "$@"
 
     load_config
     load_theme
