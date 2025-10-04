@@ -5,6 +5,8 @@
 # Repository: https://github.com/mdmattsson/syskit
 # Website: https://www.syskit.org
 
+# CRITICAL: Reset terminal state immediately (important after exec)
+stty sane 2>/dev/null || true
 
 set -e
 
@@ -1608,8 +1610,6 @@ handle_input() {
 
 # Main function
 main() {
-    # Reset terminal to proper state
-    stty sane 2>/dev/null || true
 
     # Handle command-line arguments
     case "${1:-}" in
