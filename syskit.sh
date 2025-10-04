@@ -169,9 +169,6 @@ install_syskit() {
     exec "$EXPECTED_DIR/syskit.sh" "$@"
 }
 
-# Run installation check before anything else
-check_installation
-
 
 # Uninstall function
 uninstall_syskit() {
@@ -1568,6 +1565,9 @@ main() {
             exit 0
             ;;
     esac
+
+    # check installation (after handling flags)
+    check_installation
 
     load_config
     load_theme
