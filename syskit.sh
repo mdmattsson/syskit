@@ -5,7 +5,7 @@
 # Repository: https://github.com/mdmattsson/syskit
 # Website: https://www.syskit.org
 
-set -e
+#set -e
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
