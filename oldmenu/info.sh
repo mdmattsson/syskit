@@ -1,0 +1,9 @@
+#!/bin/bash
+CATEGORIES=(
+    "System;system"
+    "Applications;applications"
+    "Security;security"
+    "Utilities;utilities"
+    "Favorites;favorites"
+    "Recent;recent"
+)
