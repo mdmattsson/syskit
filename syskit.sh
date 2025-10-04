@@ -11,9 +11,10 @@ trap cleanup EXIT
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 USERS_HOME=$HOME
-MENU_DIR="$USERS_HOME/.config/syskit/menu"
-CONFIG_DIR="$USERS_HOME/.config/syskit/cfg"
-LOGS_DIR="$USERS_HOME/.config/syskit/logs"
+EXPECTED_DIR="$USERS_HOME/.config/syskit"
+MENU_DIR="$EXPECTED_DIR/menu"
+CONFIG_DIR="$EXPECTED_DIR/cfg"
+LOGS_DIR="$EXPECTED_DIR/logs"
 VERSION="1.0.0.1"
 AUTHOR="Michael Mattsson"
 REPOSITORY="https://github.com/mdmattsson/syskit"
