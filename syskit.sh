@@ -19,11 +19,9 @@ if [[ -L "${BASH_SOURCE[0]}" ]]; then
 else
     SCRIPT_PATH="${BASH_SOURCE[0]}"
 fi
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 
 # Configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 USERS_HOME=$HOME
 EXPECTED_DIR="$USERS_HOME/.config/syskit"
 MENU_DIR="$EXPECTED_DIR/menu"
