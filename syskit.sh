@@ -6,30 +6,11 @@
 # Website: https://www.syskit.org
 
 
-set -eE
+set -e
 
+# Only set error trap during installation, not normal operation
+# This gets removed after installation completes
 ERROR_LOG="/tmp/syskit-error-$$.log"
-
-error_handler() {
-    {
-        echo "================================"
-        echo "ERROR: Installation failed"
-        echo "Line: $1"
-        echo "Command: $BASH_COMMAND"
-        echo "Exit code: $?"
-        echo "Time: $(date)"
-        echo "================================"
-    } >> "$ERROR_LOG"
-    
-    # Also try to output to console (might get cleared)
-    echo "ERROR: Installation failed at line $1" >&2
-    echo "Check $ERROR_LOG for details" >&2
-    
-    exit 1
-}
-
-trap 'error_handler $LINENO' ERR
-
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,11 +60,24 @@ check_installation() {
 
 # Installation function
 install_syskit() {
-    # Disable error trap during installation so we can handle errors properly
-    trap - ERR
+    # Set up error handling ONLY for installation
+    set -eE
+
+    error_handler() {
+        {
+            echo "================================"
+            echo "ERROR: Installation failed"
+            echo "Line: $1"
+            echo "Command: $BASH_COMMAND"
+            echo "Time: $(date)"
+            echo "================================"
+        } | tee -a "$ERROR_LOG" >&2
+        exit 1
+    }
+
+    trap 'error_handler $LINENO' ERR
 
     echo "Installing SysKit..."
-    
     local REPO_URL="https://github.com/mdmattsson/syskit.git"
 
     # Determine bin directory
@@ -331,9 +325,17 @@ interface_drawn=false
 
 # Terminal control
 cleanup() {
-    tput cnorm
-    tput sgr0
-    clear
+    # Only do terminal cleanup if we're running the interactive menu
+    # Don't clear screen if we're in installation mode or had an error
+    if [[ "${RUNNING_INTERACTIVE:-false}" == "true" ]]; then
+        tput cnorm 2>/dev/null || true
+        tput sgr0 2>/dev/null || true
+        clear
+    else
+        # Just restore cursor visibility without clearing
+        tput cnorm 2>/dev/null || true
+        tput sgr0 2>/dev/null || true
+    fi
 }
 
 trap cleanup EXIT
@@ -1598,7 +1600,7 @@ handle_input() {
 
 # Main function
 main() {
-    # Reset terminal to sane state (important after exec)
+    # Reset terminal to proper state
     stty sane 2>/dev/null || true
 
     # Handle command-line arguments
