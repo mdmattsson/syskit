@@ -1262,6 +1262,8 @@ show_execution_overlay() {
     local overlay_height=$((term_height - 8))
     local overlay_start=$((CATEGORY_WIDTH + 2))
     local output_file=$(mktemp)
+    local scroll_position=0
+    local total_lines=0
 
     # Save terminal state
     local orig_stty=$(stty -g)
@@ -1287,6 +1289,7 @@ show_execution_overlay() {
 
     local script_pid=""
     local execution_stopped=false
+    local execution_complete=false
 
     # Improved signal handling
     trap 'handle_stop_signal' INT
@@ -1307,7 +1310,8 @@ show_execution_overlay() {
 
         # Update bottom border for stopped state
         tput cup $((4 + overlay_height - 1)) $overlay_start
-        printf "└─ ${RED}STOPPED${RESET} - Press [Enter] to close %*s─┘" $((overlay_width-38)) ""
+        printf "└─ ${RED}STOPPED${RESET} - [↑↓] Scroll [Enter] Close %*s─┘" $((overlay_width-44)) ""
+        execution_complete=true
     }
 
     # Execute script in background
@@ -1334,31 +1338,64 @@ show_execution_overlay() {
 
     # Monitor execution and display output
     while kill -0 "$script_pid" 2>/dev/null; do
-        display_output "$output_file" $overlay_start $overlay_width $overlay_height
+        total_lines=$(wc -l < "$output_file" 2>/dev/null || echo 0)
+        display_output_scrollable "$output_file" $overlay_start $overlay_width $overlay_height $scroll_position
         sleep 0.1
     done
 
     # Wait for script completion
     wait "$script_pid" 2>/dev/null || true
 
-    # Display final output
-    display_output "$output_file" $overlay_start $overlay_width $overlay_height
+    # Display final output and count lines
+    total_lines=$(wc -l < "$output_file" 2>/dev/null || echo 0)
+    display_output_scrollable "$output_file" $overlay_start $overlay_width $overlay_height $scroll_position
 
     # Only update to completion status if not stopped by user
     if [[ "$execution_stopped" == false ]]; then
         # Clear and redraw bottom border with completion status
         tput cup $((4 + overlay_height - 1)) $overlay_start
-        printf "└─ ${GREEN}COMPLETED${RESET} - Press [Enter] to close %*s─┘" $((overlay_width-40)) ""
+        printf "└─ ${GREEN}COMPLETED${RESET} - [↑↓] Scroll [Enter] Close %*s─┘" $((overlay_width-48)) ""
+        execution_complete=true
     fi
 
-    # Disable terminal echo and wait for Enter key only
+    # Enable scrolling after execution completes
     stty -echo -icanon min 1 time 0
 
-    stty -echo -icanon min 1 time 0
     while true; do
         key=$(dd bs=1 count=1 2>/dev/null)
-        if [[ "$key" == $'\n' ]] || [[ "$key" == $'\r' ]] || [[ "$key" == "" ]]; then
+        
+        # Check for Enter to close
+        if [[ "$key" == $'\n' ]] || [[ "$key" == $'\r' ]]; then
             break
+        fi
+        
+        # Check for escape sequence (arrow keys)
+        if [[ "$key" == $'\x1b' ]]; then
+            # Read the next two characters
+            key2=$(dd bs=1 count=1 2>/dev/null)
+            key3=$(dd bs=1 count=1 2>/dev/null)
+            
+            if [[ "$key2" == '[' ]]; then
+                case "$key3" in
+                    'A')  # Up arrow
+                        if [[ $scroll_position -gt 0 ]]; then
+                            ((scroll_position--))
+                            display_output_scrollable "$output_file" $overlay_start $overlay_width $overlay_height $scroll_position
+                        fi
+                        ;;
+                    'B')  # Down arrow
+                        local content_height=$((overlay_height - 3))
+                        local max_scroll=$((total_lines - content_height))
+                        if [[ $max_scroll -lt 0 ]]; then
+                            max_scroll=0
+                        fi
+                        if [[ $scroll_position -lt $max_scroll ]]; then
+                            ((scroll_position++))
+                            display_output_scrollable "$output_file" $overlay_start $overlay_width $overlay_height $scroll_position
+                        fi
+                        ;;
+                esac
+            fi
         fi
     done
 
@@ -1370,35 +1407,39 @@ show_execution_overlay() {
     rm -f "$output_file"
 }
 
-# Display output in overlay
-display_output() {
+
+# Display output in overlay with scrolling
+display_output_scrollable() {
     local output_file="$1"
     local start_col=$2
     local width=$3
     local height=$4
-    local content_width=$((width - 4))  # Account for borders and padding
-    local content_height=$((height - 3)) # Account for top and bottom borders
+    local scroll_pos=$5
+    local content_width=$((width - 4))
+    local content_height=$((height - 3))
 
     local line_num=0
+    local display_line=0
 
-    # Read and display output line by line
+    # Read and display output line by line, skipping lines before scroll position
     while IFS= read -r line || [[ -n "$line" ]]; do
-        if [[ $line_num -lt $content_height ]]; then
-            local row=$((5 + line_num))
-            tput cup $row $((start_col + 2))  # Position inside the border
-            # Clear the line first, then write content
+        if [[ $line_num -ge $scroll_pos ]] && [[ $display_line -lt $content_height ]]; then
+            local row=$((5 + display_line))
+            tput cup $row $((start_col + 2))
             printf "%-${content_width}s" "${line:0:$content_width}"
+            ((display_line++))
         fi
         ((line_num++))
     done < "$output_file"
 
     # Clear any remaining lines in the content area
-    for ((i=line_num; i<content_height; i++)); do
+    for ((i=display_line; i<content_height; i++)); do
         local row=$((5 + i))
         tput cup $row $((start_col + 2))
         printf "%-${content_width}s" ""
     done
 }
+
 
 # Change theme
 change_theme() {
