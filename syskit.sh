@@ -1314,25 +1314,31 @@ show_execution_overlay() {
         execution_complete=true
     }
 
-    # Execute script in background
-    {
-        echo "=== Execution started at $(date) ==="
-        echo "Action: $(basename "$action_file")"
-        echo "======================================"
-        echo ""
+    # Execute script with terminal input available
+    (
+        {
+            echo "=== Execution started at $(date) ==="
+            echo "Action: $(basename "$action_file")"
+            echo "======================================"
+            echo ""
 
-        source "$action_file"
-        if declare -f run >/dev/null; then
-            run
-        else
-            echo "Error: No 'run' function found"
-        fi
+            source "$action_file"
+            if declare -f run >/dev/null; then
+                # Restore terminal for interactive input (like sudo)
+                stty "$orig_stty"
+                run
+                # Save terminal state again after execution
+                orig_stty=$(stty -g)
+            else
+                echo "Error: No 'run' function found"
+            fi
 
-        echo ""
-        echo "======================================"
-        echo "=== Execution completed at $(date) ==="
-        unset -f run 2>/dev/null || true
-    } > "$output_file" 2>&1 &
+            echo ""
+            echo "======================================"
+            echo "=== Execution completed at $(date) ==="
+            unset -f run 2>/dev/null || true
+        } 2>&1 | tee "$output_file"
+    ) &
 
     script_pid=$!
 
