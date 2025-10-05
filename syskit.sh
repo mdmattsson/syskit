@@ -10,10 +10,6 @@ stty sane 2>/dev/null || true
 
 set -e
 
-# Only set error trap during installation, not normal operation
-# This gets removed after installation completes
-ERROR_LOG="/tmp/syskit-error-$$.log"
-
 
 # Resolve symlinks to get actual script location
 if [[ -L "${BASH_SOURCE[0]}" ]]; then
@@ -304,40 +300,6 @@ uninstall_syskit() {
     exit 0
 }
 
-#
-# MENU MODE:
-#
-
-# Create required directories
-mkdir -p "$CONFIG_DIR" "$LOGS_DIR"
-
-# Menu state variables
-declare -A categories
-declare -A category_folders
-declare -a category_list
-declare -a current_actions
-declare -a favorites
-declare -a recent_actions
-declare -a search_results
-current_category=""
-current_folder=""
-selected_category=0
-selected_action=0
-active_pane="categories"
-current_theme="dark"
-search_mode=false
-scroll_pos=0
-
-
-# Layout variables
-CATEGORY_WIDTH=0
-ACTIONS_COL=0
-
-# Previous state for partial updates
-prev_selected_category=-1
-prev_selected_action=-1
-prev_active_pane=""
-interface_drawn=false
 
 # Terminal control
 cleanup() {
@@ -1640,6 +1602,40 @@ main() {
 
     # check installation, passing all arguments
     check_installation "$@"
+
+    # Create required directories
+    mkdir -p "$CONFIG_DIR" "$LOGS_DIR"
+
+    # Menu state variables
+    declare -A categories
+    declare -A category_folders
+    declare -a category_list
+    declare -a current_actions
+    declare -a favorites
+    declare -a recent_actions
+    declare -a search_results
+    current_category=""
+    current_folder=""
+    selected_category=0
+    selected_action=0
+    active_pane="categories"
+    current_theme="dark"
+    search_mode=false
+    scroll_pos=0
+
+
+    # Layout variables
+    CATEGORY_WIDTH=0
+    ACTIONS_COL=0
+
+    # Previous state for partial updates
+    prev_selected_category=-1
+    prev_selected_action=-1
+    prev_active_pane=""
+    interface_drawn=false
+
+    # Mark that we're running the interactive menu
+    RUNNING_INTERACTIVE=true
 
     load_config
     load_theme
