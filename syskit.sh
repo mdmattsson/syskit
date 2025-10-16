@@ -1246,6 +1246,32 @@ execute_action() {
         fi
         unset DESTRUCTIVE DESCRIPTION DEPENDENCIES LONG_DESCRIPTION
 
+
+        if [[ "${REQUIRES_SUDO:-false}" == "true" ]]; then
+            # Exit TUI temporarily for interactive execution
+            cleanup
+            echo "This action requires elevated privileges."
+            echo "Press Enter to continue..."
+            read
+            
+            source "$action_file"
+            if declare -f run >/dev/null; then
+                run
+            fi
+            
+            echo ""
+            echo "Press Enter to return to menu..."
+            read
+            
+            # Redraw interface
+            init_terminal
+            interface_drawn=false
+        else
+            # Use overlay for non-interactive actions
+            show_execution_overlay "$desc" "$action_file"
+        fi
+
+
         add_to_recent "$action_info"
         show_execution_overlay "$desc" "$action_file"
         interface_drawn=false
