@@ -1,7 +1,7 @@
 #!/bin/bash
 # Transfer Git config and SSH files between machines, WSL, and Windows
 # Supports local and remote Windows, WSL, and Linux systems
-# Usage: ./transfer-ssh.sh [--from SOURCE] --to DESTINATION [options]
+# Usage: ./transfer-ssh.sh --from SOURCE --to DESTINATION [options]
 
 set -e
 
@@ -489,19 +489,26 @@ check_ssh_connection() {
     local host="$1"
     local control_path="$2"
     
-    log "Testing SSH connection to $host..."
+    log "Setting up SSH connection to $host..."
+    info "This establishes a persistent connection for all file transfers"
     
-    # Try without BatchMode to allow password auth (don't suppress stderr for password prompts)
-    if ssh -o ConnectTimeout=5 "$host" exit; then
-        log "SSH connection successful"
-        # Try to set up master connection (may prompt for password once more)
-        setup_ssh_connection "$host" "$control_path" || warn "Continuing without SSH multiplexing"
+    mkdir -p "$(dirname "$control_path")"
+    
+    # Start master connection - this will prompt for password once if needed
+    # The -f backgrounds it, -N means no command, ControlMaster creates the socket
+    if ssh -o ControlMaster=yes \
+           -o ControlPath="$control_path" \
+           -o ControlPersist=10m \
+           -o ConnectTimeout=10 \
+           -fN "$host"; then
+        log "Persistent SSH connection established successfully"
+        log "All file transfers will reuse this connection (no more password prompts)"
         return 0
     else
-        error "Cannot connect to $host via SSH"
+        error "Cannot establish SSH connection to $host"
         error "Please check:"
         echo "  1. Host is reachable"
-        echo "  2. SSH keys are set up (or password authentication is enabled)"
+        echo "  2. SSH credentials are correct (password or keys)"
         echo "  3. SSH daemon is running on target"
         exit 1
     fi
@@ -520,8 +527,34 @@ remote_exec() {
             ssh $(get_ssh_opts "$ssh_opts_type") "$ssh_host" "$command"
             ;;
         remote-windows)
-            # Execute on Windows via SSH (cmd.exe or powershell)
-            ssh $(get_ssh_opts "$ssh_opts_type") "$ssh_host" "$command"
+            # Execute on Windows via SSH using PowerShell
+            # Convert Unix commands to PowerShell equivalents
+            local ps_command="$command"
+            
+            # Convert common Unix commands to PowerShell
+            # cat file -> Get-Content file
+            if [[ "$command" =~ ^cat[[:space:]] ]]; then
+                local filepath="${command#cat }"
+                ps_command="Get-Content -Raw '$filepath'"
+            # test -f file -> Test-Path file
+            elif [[ "$command" =~ ^test[[:space:]]+-f[[:space:]] ]]; then
+                local filepath="${command#test -f }"
+                ps_command="Test-Path -PathType Leaf '$filepath'"
+            # test -d dir -> Test-Path dir
+            elif [[ "$command" =~ ^test[[:space:]]+-d[[:space:]] ]]; then
+                local dirpath="${command#test -d }"
+                ps_command="Test-Path -PathType Container '$dirpath'"
+            # find dir -type f -> Get-ChildItem -File -Recurse
+            elif [[ "$command" =~ ^find[[:space:]] ]]; then
+                local dirpath=$(echo "$command" | awk '{print $2}')
+                ps_command="Get-ChildItem -Path '$dirpath' -File -Recurse | ForEach-Object { \$_.FullName.Replace('$dirpath\\', '').Replace('\\', '/') }"
+            # mkdir -p dir -> New-Item -ItemType Directory -Force
+            elif [[ "$command" =~ ^mkdir[[:space:]]+-p[[:space:]] ]]; then
+                local dirpath="${command#mkdir -p }"
+                ps_command="New-Item -ItemType Directory -Force -Path '$dirpath' | Out-Null"
+            fi
+            
+            ssh $(get_ssh_opts "$ssh_opts_type") "$ssh_host" "powershell.exe -Command \"$ps_command\""
             ;;
         remote-wsl)
             # Execute in WSL on remote Windows
@@ -690,10 +723,20 @@ write_to_destination() {
             esac
             ;;
         remote-windows)
+            # For Windows, we need to use PowerShell to write files from stdin
             case "$file" in
-                gitconfig) echo "$content" | remote_exec "$TO_TYPE" "$TO_SSH_HOST" "" "cat > $DST_GITCONFIG" "to" ;;
-                gitignore) echo "$content" | remote_exec "$TO_TYPE" "$TO_SSH_HOST" "" "cat > $DST_GITIGNORE" "to" ;;
-                *) echo "$content" | remote_exec "$TO_TYPE" "$TO_SSH_HOST" "" "cat > $DST_SSH/$file" "to" ;;
+                gitconfig) 
+                    echo "$content" | ssh $(get_ssh_opts "to") "$TO_SSH_HOST" \
+                        "powershell.exe -Command \"\\\$input | Set-Content -Path '$DST_GITCONFIG' -NoNewline\""
+                    ;;
+                gitignore) 
+                    echo "$content" | ssh $(get_ssh_opts "to") "$TO_SSH_HOST" \
+                        "powershell.exe -Command \"\\\$input | Set-Content -Path '$DST_GITIGNORE' -NoNewline\""
+                    ;;
+                *) 
+                    echo "$content" | ssh $(get_ssh_opts "to") "$TO_SSH_HOST" \
+                        "powershell.exe -Command \"\\\$input | Set-Content -Path '$DST_SSH/$file' -NoNewline\""
+                    ;;
             esac
             ;;
         remote-wsl)
