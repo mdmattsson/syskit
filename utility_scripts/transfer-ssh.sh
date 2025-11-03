@@ -1,6 +1,6 @@
 #!/bin/bash
 # Transfer Git config and SSH files between machines, WSL, and Windows
-# Usage: ./transfer-config.sh --from SOURCE --to DESTINATION [options]
+# Usage: ./transfer-config.sh [--from SOURCE] --to DESTINATION [options]
 
 set -e
 
@@ -34,6 +34,7 @@ usage() {
     echo "If --from is not specified, defaults to current machine"
     echo ""
     echo "Source/Destination can be:"
+    echo "  linux                Current Linux machine"
     echo "  windows              Current Windows user home"
     echo "  windows:USERNAME     Specific Windows user"
     echo "  wsl                  Current WSL instance"
@@ -57,6 +58,9 @@ usage() {
     echo ""
     echo "  # WSL to Windows"
     echo "  $0 --from wsl --to windows:Michael"
+    echo ""
+    echo "  # Linux to remote"
+    echo "  $0 --from linux --to michael@192.168.1.100"
     echo ""
     echo "  # Remote transfers"
     echo "  $0 --from wsl --to user@server.com"
@@ -116,6 +120,11 @@ is_wsl() {
     grep -qi microsoft /proc/version 2>/dev/null
 }
 
+# Detect if running on native Linux
+is_linux() {
+    [[ -f /proc/version ]] && ! is_wsl
+}
+
 # Validate arguments
 if [[ -z "$TO_SPEC" ]]; then
     error "--to must be specified"
@@ -129,6 +138,10 @@ if [[ -z "$FROM_SPEC" ]]; then
         # Get current WSL distribution name
         FROM_SPEC="wsl"
         log "Defaulting to current WSL distribution as source"
+    elif is_linux; then
+        # Native Linux system
+        FROM_SPEC="linux"
+        log "Defaulting to current Linux system as source"
     else
         error "Could not auto-detect source machine type"
         error "Please specify --from parameter"
@@ -150,6 +163,9 @@ parse_location() {
         # SSH: user@hostname
         eval "${var_prefix}_TYPE=ssh"
         eval "${var_prefix}_HOST=$spec"
+    elif [[ "$spec" == "linux" ]]; then
+        # Native Linux (treated like WSL without distro)
+        eval "${var_prefix}_TYPE=linux"
     elif [[ "$spec" == windows:* ]]; then
         # Windows with specific user
         eval "${var_prefix}_TYPE=windows"
@@ -192,6 +208,21 @@ validate_transfer() {
         if ! is_wsl; then
             error "--to wsl requires running from within WSL"
             error "Or specify a distribution: --to wsl:DISTRO"
+            exit 1
+        fi
+    fi
+    
+    # Check if we're on Linux when needed
+    if [[ "$FROM_TYPE" == "linux" ]]; then
+        if ! is_linux; then
+            error "--from linux requires running on a native Linux system"
+            exit 1
+        fi
+    fi
+    
+    if [[ "$TO_TYPE" == "linux" ]]; then
+        if ! is_linux; then
+            error "--to linux requires running on a native Linux system"
             exit 1
         fi
     fi
@@ -260,266 +291,268 @@ get_windows_paths() {
     local user="$1"
     local prefix="$2"
     
-    eval "${prefix}_HOME=/mnt/c/Users/$user"
-    eval "${prefix}_GITCONFIG=/mnt/c/Users/$user/.gitconfig"
-    eval "${prefix}_GITIGNORE=/mnt/c/Users/$user/.gitignore_global"
-    eval "${prefix}_SSH=/mnt/c/Users/$user/.ssh"
-    
-    local home_path
-    eval "home_path=\$${prefix}_HOME"
-    
-    if [[ ! -d "$home_path" ]]; then
-        error "Windows home directory not found: $home_path"
+    if is_wsl; then
+        eval "${prefix}_SSH=\"/mnt/c/Users/$user/.ssh\""
+        eval "${prefix}_GITCONFIG=\"/mnt/c/Users/$user/.gitconfig\""
+        eval "${prefix}_GITIGNORE=\"/mnt/c/Users/$user/.gitignore_global\""
+    else
+        error "Cannot access Windows paths from non-WSL environment"
         exit 1
     fi
 }
 
-# Get WSL paths
-get_wsl_paths() {
-    local distro="$1"
-    local prefix="$2"
-    
-    if [[ -n "$distro" ]]; then
-        # Verify distribution exists
-        if command -v wsl.exe &>/dev/null; then
-            # Get list of distributions and clean up encoding issues
-            local distros_raw=$(wsl.exe -l -q 2>/dev/null)
-            local distros_clean
-            
-            # Try to convert from UTF-16LE to UTF-8, fall back to just removing \r if that fails
-            if distros_clean=$(echo "$distros_raw" | iconv -f UTF-16LE -t UTF-8 2>/dev/null); then
-                distros_clean=$(echo "$distros_clean" | tr -d '\r\n' | sed 's/  */\n/g')
-            else
-                distros_clean=$(echo "$distros_raw" | tr -d '\r')
-            fi
-            
-            # Case-insensitive search for the distribution
-            if ! echo "$distros_clean" | grep -qi "^${distro}$"; then
-                error "WSL distribution '$distro' not found"
-                echo ""
-                echo "Available distributions:"
-                echo "$distros_clean"
-                exit 1
-            fi
-        fi
-        eval "${prefix}_DISTRO=$distro"
-    else
-        eval "${prefix}_DISTRO="
-    fi
-    
-    eval "${prefix}_GITCONFIG=~/.gitconfig"
-    eval "${prefix}_GITIGNORE=~/.gitignore_global"
-    eval "${prefix}_SSH=~/.ssh"
-}
-
-# Setup paths based on source and destination types
+# Setup paths
 setup_paths() {
-    log "Setting up transfer paths..."
-    
+    # Setup source paths
     case "$FROM_TYPE" in
         windows)
-            detect_windows_user FROM_USER
+            detect_windows_user "FROM_USER"
             get_windows_paths "$FROM_USER" "SRC"
             ;;
         wsl)
-            get_wsl_paths "$FROM_DISTRO" "SRC"
+            if [[ -n "$FROM_DISTRO" ]]; then
+                log "Using WSL distribution: $FROM_DISTRO"
+            fi
+            SRC_SSH="$HOME/.ssh"
+            SRC_GITCONFIG="$HOME/.gitconfig"
+            SRC_GITIGNORE="$HOME/.gitignore_global"
+            ;;
+        linux)
+            SRC_SSH="$HOME/.ssh"
+            SRC_GITCONFIG="$HOME/.gitconfig"
+            SRC_GITIGNORE="$HOME/.gitignore_global"
             ;;
         ssh)
-            log "Using SSH source: $FROM_HOST"
+            SRC_SSH="$HOME/.ssh"
+            SRC_GITCONFIG="$HOME/.gitconfig"
+            SRC_GITIGNORE="$HOME/.gitignore_global"
+            DST_HOST="$FROM_HOST"
             ;;
     esac
     
+    # Setup destination paths
     case "$TO_TYPE" in
         windows)
-            detect_windows_user TO_USER
+            detect_windows_user "TO_USER"
             get_windows_paths "$TO_USER" "DST"
             ;;
         wsl)
-            get_wsl_paths "$TO_DISTRO" "DST"
+            if [[ -n "$TO_DISTRO" ]]; then
+                log "Using WSL distribution: $TO_DISTRO"
+            fi
+            DST_SSH="$HOME/.ssh"
+            DST_GITCONFIG="$HOME/.gitconfig"
+            DST_GITIGNORE="$HOME/.gitignore_global"
+            ;;
+        linux)
+            DST_SSH="$HOME/.ssh"
+            DST_GITCONFIG="$HOME/.gitconfig"
+            DST_GITIGNORE="$HOME/.gitignore_global"
             ;;
         ssh)
-            log "Using SSH destination: $TO_HOST"
+            DST_SSH="$HOME/.ssh"
+            DST_GITCONFIG="$HOME/.gitconfig"
+            DST_GITIGNORE="$HOME/.gitignore_global"
             DST_HOST="$TO_HOST"
             ;;
     esac
 }
 
-# Check SSH connectivity
-check_ssh_connection() {
+# SSH connection management
+SSH_CONTROL_SOCKET=""
+SSH_CONTROL_PATH="/tmp/ssh-transfer-$$"
+
+setup_ssh_connection() {
     local host="$1"
-    log "Testing SSH connection to $host..."
     
-    # Set up SSH ControlMaster for connection reuse
-    export SSH_CONTROL_PATH="/tmp/ssh-transfer-$$"
-    mkdir -p "$SSH_CONTROL_PATH"
-    export SSH_CONTROL_SOCKET="$SSH_CONTROL_PATH/%r@%h:%p"
+    log "Setting up SSH connection to $host..."
+    
+    # Create control socket
+    mkdir -p "$(dirname "$SSH_CONTROL_PATH")"
     
     # Start master connection
-    ssh -o ControlMaster=yes -o ControlPath="$SSH_CONTROL_SOCKET" -o ControlPersist=300 -fN "$host" 2>/dev/null
-    local ssh_result=$?
+    ssh -o ControlMaster=yes \
+        -o ControlPath="$SSH_CONTROL_PATH" \
+        -o ControlPersist=10m \
+        -fN "$host" 2>/dev/null || {
+        warn "Could not establish SSH master connection"
+        return 1
+    }
     
-    if [[ $ssh_result -ne 0 ]]; then
-        warn "Cannot connect to $host or passwordless SSH not set up"
-        warn "You may be prompted for your password multiple times"
-        read -p "Continue anyway? (y/n): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
-        # Clear the control socket since connection failed
-        unset SSH_CONTROL_SOCKET
-    else
-        log "SSH connection established (will be reused for all transfers)"
-    fi
+    SSH_CONTROL_SOCKET="$SSH_CONTROL_PATH"
+    log "SSH connection established"
 }
 
-# Clean up SSH control socket
 cleanup_ssh() {
-    if [[ -n "$SSH_CONTROL_SOCKET" ]] && [[ -S "$SSH_CONTROL_SOCKET" ]]; then
-        ssh -O exit -o ControlPath="$SSH_CONTROL_SOCKET" "$DST_HOST" 2>/dev/null
-    fi
-    if [[ -n "$SSH_CONTROL_PATH" ]] && [[ -d "$SSH_CONTROL_PATH" ]]; then
-        rm -rf "$SSH_CONTROL_PATH"
+    if [[ -n "$SSH_CONTROL_SOCKET" && -S "$SSH_CONTROL_SOCKET" ]]; then
+        log "Cleaning up SSH connection..."
+        ssh -O exit -o ControlPath="$SSH_CONTROL_SOCKET" "$DST_HOST" 2>/dev/null || true
+        rm -f "$SSH_CONTROL_SOCKET"
     fi
 }
 
-# Helper function to get SSH options
 get_ssh_opts() {
     if [[ -n "$SSH_CONTROL_SOCKET" ]]; then
         echo "-o ControlPath=$SSH_CONTROL_SOCKET"
     fi
 }
 
-# Backup existing files on destination
-create_backup() {
-    if [[ "$DRY_RUN" == true ]]; then
-        echo "[DRY RUN] Would backup existing files"
-        return
+check_ssh_connection() {
+    local host="$1"
+    
+    log "Testing SSH connection to $host..."
+    
+    if ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" exit 2>/dev/null; then
+        log "SSH connection successful"
+        setup_ssh_connection "$host"
+        return 0
+    else
+        error "Cannot connect to $host via SSH"
+        error "Please check:"
+        echo "  1. Host is reachable"
+        echo "  2. SSH keys are set up"
+        echo "  3. SSH daemon is running on target"
+        exit 1
     fi
-    
-    log "Creating backup of existing files..."
-    
-    local backup_suffix=".backup.$(date +%Y%m%d_%H%M%S)"
-    local backup_cmd="
-        [[ -f ~/.gitconfig ]] && cp ~/.gitconfig ~/.gitconfig$backup_suffix
-        [[ -f ~/.gitignore_global ]] && cp ~/.gitignore_global ~/.gitignore_global$backup_suffix
-        [[ -d ~/.ssh ]] && cp -r ~/.ssh ~/.ssh$backup_suffix
-    "
-    
-    case "$TO_TYPE" in
-        ssh)
-            ssh $(get_ssh_opts) "$DST_HOST" "$backup_cmd"
-            ;;
-        wsl)
-            if [[ -n "$TO_DISTRO" ]]; then
-                wsl.exe -d "$TO_DISTRO" bash -c "$backup_cmd"
-            else
-                eval "$backup_cmd"
-            fi
-            ;;
-        windows)
-            cd "$DST_HOME"
-            [[ -f .gitconfig ]] && cp .gitconfig ".gitconfig$backup_suffix"
-            [[ -f .gitignore_global ]] && cp .gitignore_global ".gitignore_global$backup_suffix"
-            [[ -d .ssh ]] && cp -r .ssh ".ssh$backup_suffix"
-            ;;
-    esac
-    
-    log "Backup created with suffix: $backup_suffix"
 }
 
-# Read content from source
+# Read file from source
 read_from_source() {
     local file="$1"
     
     case "$FROM_TYPE" in
         windows)
-            if [[ "$file" == "gitconfig" ]]; then
-                cat "$SRC_GITCONFIG"
-            elif [[ "$file" == "gitignore" ]]; then
-                cat "$SRC_GITIGNORE"
-            else
-                cat "$SRC_SSH/$file"
-            fi
+            case "$file" in
+                gitconfig) cat "$SRC_GITCONFIG" 2>/dev/null ;;
+                gitignore) cat "$SRC_GITIGNORE" 2>/dev/null ;;
+                *) cat "$SRC_SSH/$file" 2>/dev/null ;;
+            esac
             ;;
         wsl)
             if [[ -n "$FROM_DISTRO" ]]; then
-                if [[ "$file" == "gitconfig" ]]; then
-                    wsl.exe -d "$FROM_DISTRO" bash -c "cat ~/.gitconfig"
-                elif [[ "$file" == "gitignore" ]]; then
-                    wsl.exe -d "$FROM_DISTRO" bash -c "cat ~/.gitignore_global"
-                else
-                    wsl.exe -d "$FROM_DISTRO" bash -c "cat ~/.ssh/$file"
-                fi
+                case "$file" in
+                    gitconfig) wsl.exe -d "$FROM_DISTRO" bash -c "cat ~/.gitconfig" 2>/dev/null ;;
+                    gitignore) wsl.exe -d "$FROM_DISTRO" bash -c "cat ~/.gitignore_global" 2>/dev/null ;;
+                    *) wsl.exe -d "$FROM_DISTRO" bash -c "cat ~/.ssh/$file" 2>/dev/null ;;
+                esac
             else
-                if [[ "$file" == "gitconfig" ]]; then
-                    cat ~/.gitconfig
-                elif [[ "$file" == "gitignore" ]]; then
-                    cat ~/.gitignore_global
-                else
-                    cat ~/.ssh/"$file"
-                fi
+                case "$file" in
+                    gitconfig) cat ~/.gitconfig 2>/dev/null ;;
+                    gitignore) cat ~/.gitignore_global 2>/dev/null ;;
+                    *) cat ~/.ssh/"$file" 2>/dev/null ;;
+                esac
             fi
             ;;
+        linux)
+            case "$file" in
+                gitconfig) cat ~/.gitconfig 2>/dev/null ;;
+                gitignore) cat ~/.gitignore_global 2>/dev/null ;;
+                *) cat ~/.ssh/"$file" 2>/dev/null ;;
+            esac
+            ;;
         ssh)
-            if [[ "$file" == "gitconfig" ]]; then
-                cat ~/.gitconfig
-            elif [[ "$file" == "gitignore" ]]; then
-                cat ~/.gitignore_global
-            else
-                cat ~/.ssh/"$file"
-            fi
+            case "$file" in
+                gitconfig) ssh $(get_ssh_opts) "$FROM_HOST" "cat ~/.gitconfig" 2>/dev/null ;;
+                gitignore) ssh $(get_ssh_opts) "$FROM_HOST" "cat ~/.gitignore_global" 2>/dev/null ;;
+                *) ssh $(get_ssh_opts) "$FROM_HOST" "cat ~/.ssh/$file" 2>/dev/null ;;
+            esac
             ;;
     esac
 }
 
-# Write content to destination
+# Write file to destination
 write_to_destination() {
     local file="$1"
     local content="$2"
     
     case "$TO_TYPE" in
         windows)
-            if [[ "$file" == "gitconfig" ]]; then
-                echo "$content" > "$DST_GITCONFIG"
-            elif [[ "$file" == "gitignore" ]]; then
-                echo "$content" > "$DST_GITIGNORE"
-            else
-                echo "$content" > "$DST_SSH/$file"
-            fi
+            case "$file" in
+                gitconfig) echo "$content" > "$DST_GITCONFIG" ;;
+                gitignore) echo "$content" > "$DST_GITIGNORE" ;;
+                *) echo "$content" > "$DST_SSH/$file" ;;
+            esac
             ;;
         wsl)
             if [[ -n "$TO_DISTRO" ]]; then
-                if [[ "$file" == "gitconfig" ]]; then
-                    echo "$content" | wsl.exe -d "$TO_DISTRO" bash -c "cat > ~/.gitconfig"
-                elif [[ "$file" == "gitignore" ]]; then
-                    echo "$content" | wsl.exe -d "$TO_DISTRO" bash -c "cat > ~/.gitignore_global"
-                else
-                    echo "$content" | wsl.exe -d "$TO_DISTRO" bash -c "cat > ~/.ssh/$file"
-                fi
+                case "$file" in
+                    gitconfig) echo "$content" | wsl.exe -d "$TO_DISTRO" bash -c "cat > ~/.gitconfig" ;;
+                    gitignore) echo "$content" | wsl.exe -d "$TO_DISTRO" bash -c "cat > ~/.gitignore_global" ;;
+                    *) echo "$content" | wsl.exe -d "$TO_DISTRO" bash -c "cat > ~/.ssh/$file" ;;
+                esac
             else
-                if [[ "$file" == "gitconfig" ]]; then
-                    echo "$content" > ~/.gitconfig
-                elif [[ "$file" == "gitignore" ]]; then
-                    echo "$content" > ~/.gitignore_global
-                else
-                    echo "$content" > ~/.ssh/"$file"
-                fi
+                case "$file" in
+                    gitconfig) echo "$content" > ~/.gitconfig ;;
+                    gitignore) echo "$content" > ~/.gitignore_global ;;
+                    *) echo "$content" > ~/.ssh/"$file" ;;
+                esac
             fi
             ;;
+        linux)
+            case "$file" in
+                gitconfig) echo "$content" > ~/.gitconfig ;;
+                gitignore) echo "$content" > ~/.gitignore_global ;;
+                *) echo "$content" > ~/.ssh/"$file" ;;
+            esac
+            ;;
         ssh)
-            if [[ "$file" == "gitconfig" ]]; then
-                echo "$content" | ssh $(get_ssh_opts) "$DST_HOST" "cat > ~/.gitconfig"
-            elif [[ "$file" == "gitignore" ]]; then
-                echo "$content" | ssh $(get_ssh_opts) "$DST_HOST" "cat > ~/.gitignore_global"
-            else
-                echo "$content" | ssh $(get_ssh_opts) "$DST_HOST" "cat > ~/.ssh/$file"
-            fi
+            case "$file" in
+                gitconfig) echo "$content" | ssh $(get_ssh_opts) "$TO_HOST" "cat > ~/.gitconfig" ;;
+                gitignore) echo "$content" | ssh $(get_ssh_opts) "$TO_HOST" "cat > ~/.gitignore_global" ;;
+                *) echo "$content" | ssh $(get_ssh_opts) "$TO_HOST" "cat > ~/.ssh/$file" ;;
+            esac
             ;;
     esac
 }
 
-# Transfer Git config files
+# Create backup
+create_backup() {
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY RUN] Would create backups of existing files"
+        return
+    fi
+    
+    log "Creating backups of existing files..."
+    
+    local backup_suffix=".backup-$(date +%Y%m%d-%H%M%S)"
+    
+    case "$TO_TYPE" in
+        ssh)
+            ssh $(get_ssh_opts) "$DST_HOST" "
+                [[ -f ~/.gitconfig ]] && cp ~/.gitconfig ~/.gitconfig$backup_suffix
+                [[ -f ~/.gitignore_global ]] && cp ~/.gitignore_global ~/.gitignore_global$backup_suffix
+                [[ -d ~/.ssh ]] && cp -r ~/.ssh ~/.ssh$backup_suffix
+            " 2>/dev/null || true
+            ;;
+        wsl)
+            if [[ -n "$TO_DISTRO" ]]; then
+                wsl.exe -d "$TO_DISTRO" bash -c "
+                    [[ -f ~/.gitconfig ]] && cp ~/.gitconfig ~/.gitconfig$backup_suffix
+                    [[ -f ~/.gitignore_global ]] && cp ~/.gitignore_global ~/.gitignore_global$backup_suffix
+                    [[ -d ~/.ssh ]] && cp -r ~/.ssh ~/.ssh$backup_suffix
+                " 2>/dev/null || true
+            else
+                [[ -f ~/.gitconfig ]] && cp ~/.gitconfig ~/.gitconfig$backup_suffix
+                [[ -f ~/.gitignore_global ]] && cp ~/.gitignore_global ~/.gitignore_global$backup_suffix
+                [[ -d ~/.ssh ]] && cp -r ~/.ssh ~/.ssh$backup_suffix 2>/dev/null || true
+            fi
+            ;;
+        linux)
+            [[ -f ~/.gitconfig ]] && cp ~/.gitconfig ~/.gitconfig$backup_suffix
+            [[ -f ~/.gitignore_global ]] && cp ~/.gitignore_global ~/.gitignore_global$backup_suffix
+            [[ -d ~/.ssh ]] && cp -r ~/.ssh ~/.ssh$backup_suffix 2>/dev/null || true
+            ;;
+        windows)
+            [[ -f "$DST_GITCONFIG" ]] && cp "$DST_GITCONFIG" "$DST_GITCONFIG$backup_suffix"
+            [[ -f "$DST_GITIGNORE" ]] && cp "$DST_GITIGNORE" "$DST_GITIGNORE$backup_suffix"
+            [[ -d "$DST_SSH" ]] && cp -r "$DST_SSH" "$DST_SSH$backup_suffix" 2>/dev/null || true
+            ;;
+    esac
+    
+    log "Backups created with suffix: $backup_suffix"
+}
+
+# Transfer Git config
 transfer_git_config() {
     if [[ "$SSH_ONLY" == true ]]; then
         return
@@ -527,17 +560,18 @@ transfer_git_config() {
     
     log "Transferring Git configuration..."
     
-    # Check if source gitconfig exists
+    # Check if source .gitconfig exists
     local has_gitconfig=false
     case "$FROM_TYPE" in
         windows) [[ -f "$SRC_GITCONFIG" ]] && has_gitconfig=true ;;
-        wsl)
+        wsl) 
             if [[ -n "$FROM_DISTRO" ]]; then
                 wsl.exe -d "$FROM_DISTRO" bash -c "[[ -f ~/.gitconfig ]]" 2>/dev/null && has_gitconfig=true
             else
                 [[ -f ~/.gitconfig ]] && has_gitconfig=true
             fi
             ;;
+        linux) [[ -f ~/.gitconfig ]] && has_gitconfig=true ;;
         ssh) [[ -f ~/.gitconfig ]] && has_gitconfig=true ;;
     esac
     
@@ -551,13 +585,13 @@ transfer_git_config() {
         return
     fi
     
-    # Transfer based on type
+    # Transfer .gitconfig
     if [[ "$FROM_TYPE" == "ssh" ]]; then
         scp $(get_ssh_opts) ~/.gitconfig "$DST_HOST":~/
     elif [[ "$TO_TYPE" == "ssh" ]]; then
         case "$FROM_TYPE" in
             windows) scp $(get_ssh_opts) "$SRC_GITCONFIG" "$DST_HOST":~/.gitconfig ;;
-            wsl) 
+            wsl)
                 if [[ -n "$FROM_DISTRO" ]]; then
                     local content=$(wsl.exe -d "$FROM_DISTRO" bash -c "cat ~/.gitconfig")
                     echo "$content" | ssh $(get_ssh_opts) "$DST_HOST" "cat > ~/.gitconfig"
@@ -565,6 +599,7 @@ transfer_git_config() {
                     scp $(get_ssh_opts) ~/.gitconfig "$DST_HOST":~/
                 fi
                 ;;
+            linux) scp $(get_ssh_opts) ~/.gitconfig "$DST_HOST":~/ ;;
         esac
     else
         local content=$(read_from_source "gitconfig")
@@ -573,7 +608,7 @@ transfer_git_config() {
     
     log "Transferred .gitconfig"
     
-    # Also try gitignore_global
+    # Transfer .gitignore_global if it exists
     local has_gitignore=false
     case "$FROM_TYPE" in
         windows) [[ -f "$SRC_GITIGNORE" ]] && has_gitignore=true ;;
@@ -584,6 +619,7 @@ transfer_git_config() {
                 [[ -f ~/.gitignore_global ]] && has_gitignore=true
             fi
             ;;
+        linux) [[ -f ~/.gitignore_global ]] && has_gitignore=true ;;
         ssh) [[ -f ~/.gitignore_global ]] && has_gitignore=true ;;
     esac
     
@@ -601,6 +637,7 @@ transfer_git_config() {
                         scp $(get_ssh_opts) ~/.gitignore_global "$DST_HOST":~/
                     fi
                     ;;
+                linux) scp $(get_ssh_opts) ~/.gitignore_global "$DST_HOST":~/ ;;
             esac
         else
             local content=$(read_from_source "gitignore")
@@ -622,6 +659,9 @@ get_ssh_files() {
             else
                 find ~/.ssh -type f 2>/dev/null | sed 's|^.*/\.ssh/||'
             fi
+            ;;
+        linux)
+            find ~/.ssh -type f 2>/dev/null | sed 's|^.*/\.ssh/||'
             ;;
         ssh)
             find ~/.ssh -type f 2>/dev/null | sed 's|^.*/\.ssh/||'
@@ -648,6 +688,7 @@ transfer_ssh_files() {
                 [[ -d ~/.ssh ]] && has_ssh=true
             fi
             ;;
+        linux) [[ -d ~/.ssh ]] && has_ssh=true ;;
         ssh) [[ -d ~/.ssh ]] && has_ssh=true ;;
     esac
     
@@ -674,6 +715,7 @@ transfer_ssh_files() {
                 mkdir -p ~/.ssh
             fi
             ;;
+        linux) mkdir -p ~/.ssh ;;
         windows) mkdir -p "$DST_SSH" ;;
     esac
     
@@ -707,6 +749,13 @@ transfer_ssh_files() {
                     else
                         rsync -av --progress ~/.ssh/ "$DST_HOST":~/.ssh/
                     fi
+                fi
+                ;;
+            linux)
+                if [[ -n "$SSH_CONTROL_SOCKET" ]]; then
+                    rsync -av --progress -e "ssh -o ControlPath=$SSH_CONTROL_SOCKET" ~/.ssh/ "$DST_HOST":~/.ssh/
+                else
+                    rsync -av --progress ~/.ssh/ "$DST_HOST":~/.ssh/
                 fi
                 ;;
             ssh) 
@@ -764,6 +813,9 @@ set_permissions() {
             else
                 eval "$perm_cmd"
             fi
+            ;;
+        linux)
+            eval "$perm_cmd"
             ;;
         windows)
             warn "Windows permissions are different from Unix"
