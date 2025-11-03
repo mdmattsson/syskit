@@ -999,42 +999,96 @@ set_permissions() {
     
     log "Setting proper permissions..."
     
-    local perm_cmd="
-        [[ -f ~/.gitconfig ]] && chmod 644 ~/.gitconfig 2>/dev/null || true
-        [[ -f ~/.gitignore_global ]] && chmod 644 ~/.gitignore_global 2>/dev/null || true
-        if [[ -d ~/.ssh ]]; then
-            chmod 700 ~/.ssh 2>/dev/null || true
-            find ~/.ssh -type f -name 'id_*' ! -name '*.pub' -exec chmod 600 {} \; 2>/dev/null || true
-            find ~/.ssh -type f -name '*_rsa' ! -name '*.pub' -exec chmod 600 {} \; 2>/dev/null || true
-            find ~/.ssh -type f -name '*_ed25519' ! -name '*.pub' -exec chmod 600 {} \; 2>/dev/null || true
-            find ~/.ssh -type f -name '*_ecdsa' ! -name '*.pub' -exec chmod 600 {} \; 2>/dev/null || true
-            find ~/.ssh -type f -name '*.pub' -exec chmod 644 {} \; 2>/dev/null || true
-            [[ -f ~/.ssh/config ]] && chmod 600 ~/.ssh/config 2>/dev/null || true
-            [[ -f ~/.ssh/known_hosts ]] && chmod 644 ~/.ssh/known_hosts 2>/dev/null || true
-            [[ -f ~/.ssh/authorized_keys ]] && chmod 600 ~/.ssh/authorized_keys 2>/dev/null || true
-        fi
-    "
-    
     case "$TO_TYPE" in
         remote-linux)
-            remote_exec "$TO_TYPE" "$TO_SSH_HOST" "" "$perm_cmd" "to"
+            # For remote Linux, can use complex commands
+            ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "
+                test -f ~/.gitconfig && chmod 644 ~/.gitconfig 2>/dev/null || true
+                test -f ~/.gitignore_global && chmod 644 ~/.gitignore_global 2>/dev/null || true
+                if [ -d ~/.ssh ]; then
+                    chmod 700 ~/.ssh 2>/dev/null || true
+                    find ~/.ssh -type f -name 'id_*' ! -name '*.pub' -exec chmod 600 {} \; 2>/dev/null || true
+                    find ~/.ssh -type f -name '*_rsa' ! -name '*.pub' -exec chmod 600 {} \; 2>/dev/null || true
+                    find ~/.ssh -type f -name '*_ed25519' ! -name '*.pub' -exec chmod 600 {} \; 2>/dev/null || true
+                    find ~/.ssh -type f -name '*_ecdsa' ! -name '*.pub' -exec chmod 600 {} \; 2>/dev/null || true
+                    find ~/.ssh -type f -name '*.pub' -exec chmod 644 {} \; 2>/dev/null || true
+                    test -f ~/.ssh/config && chmod 600 ~/.ssh/config 2>/dev/null || true
+                    test -f ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts 2>/dev/null || true
+                    test -f ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys 2>/dev/null || true
+                fi
+            "
             ;;
         remote-windows)
             warn "Windows permissions handling not implemented for OpenSSH"
             warn "You may need to set proper ACLs manually"
             ;;
         remote-wsl)
-            remote_exec "$TO_TYPE" "$TO_SSH_HOST" "$TO_DISTRO" "$perm_cmd" "to"
+            # For remote WSL, use simple individual commands to avoid quoting hell
+            if [[ -n "$TO_DISTRO" ]]; then
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO chmod 644 ~/.gitconfig" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO chmod 644 ~/.gitignore_global" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO chmod 700 ~/.ssh" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO find ~/.ssh -type f -name 'id_*' ! -name '*.pub' -exec chmod 600 {} +" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO find ~/.ssh -type f -name '*_rsa' ! -name '*.pub' -exec chmod 600 {} +" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO find ~/.ssh -type f -name '*_ed25519' ! -name '*.pub' -exec chmod 600 {} +" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO find ~/.ssh -type f -name '*_ecdsa' ! -name '*.pub' -exec chmod 600 {} +" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO find ~/.ssh -type f -name '*.pub' -exec chmod 644 {} +" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO chmod 600 ~/.ssh/config" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO chmod 644 ~/.ssh/known_hosts" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO chmod 600 ~/.ssh/authorized_keys" 2>/dev/null || true
+            else
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe chmod 644 ~/.gitconfig" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe chmod 644 ~/.gitignore_global" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe chmod 700 ~/.ssh" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe find ~/.ssh -type f -name 'id_*' ! -name '*.pub' -exec chmod 600 {} +" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe find ~/.ssh -type f -name '*_rsa' ! -name '*.pub' -exec chmod 600 {} +" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe find ~/.ssh -type f -name '*_ed25519' ! -name '*.pub' -exec chmod 600 {} +" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe find ~/.ssh -type f -name '*_ecdsa' ! -name '*.pub' -exec chmod 600 {} +" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe find ~/.ssh -type f -name '*.pub' -exec chmod 644 {} +" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe chmod 600 ~/.ssh/config" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe chmod 644 ~/.ssh/known_hosts" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe chmod 600 ~/.ssh/authorized_keys" 2>/dev/null || true
+            fi
             ;;
         wsl)
             if [[ -n "$TO_DISTRO" ]]; then
-                wsl.exe -d "$TO_DISTRO" bash -c "$perm_cmd"
+                wsl.exe -d "$TO_DISTRO" chmod 644 ~/.gitconfig 2>/dev/null || true
+                wsl.exe -d "$TO_DISTRO" chmod 644 ~/.gitignore_global 2>/dev/null || true
+                wsl.exe -d "$TO_DISTRO" chmod 700 ~/.ssh 2>/dev/null || true
+                wsl.exe -d "$TO_DISTRO" find ~/.ssh -type f -name 'id_*' ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+                wsl.exe -d "$TO_DISTRO" find ~/.ssh -type f -name '*_rsa' ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+                wsl.exe -d "$TO_DISTRO" find ~/.ssh -type f -name '*_ed25519' ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+                wsl.exe -d "$TO_DISTRO" find ~/.ssh -type f -name '*_ecdsa' ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+                wsl.exe -d "$TO_DISTRO" find ~/.ssh -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true
+                wsl.exe -d "$TO_DISTRO" chmod 600 ~/.ssh/config 2>/dev/null || true
+                wsl.exe -d "$TO_DISTRO" chmod 644 ~/.ssh/known_hosts 2>/dev/null || true
+                wsl.exe -d "$TO_DISTRO" chmod 600 ~/.ssh/authorized_keys 2>/dev/null || true
             else
-                eval "$perm_cmd"
+                chmod 644 ~/.gitconfig 2>/dev/null || true
+                chmod 644 ~/.gitignore_global 2>/dev/null || true
+                chmod 700 ~/.ssh 2>/dev/null || true
+                find ~/.ssh -type f -name 'id_*' ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+                find ~/.ssh -type f -name '*_rsa' ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+                find ~/.ssh -type f -name '*_ed25519' ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+                find ~/.ssh -type f -name '*_ecdsa' ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+                find ~/.ssh -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true
+                chmod 600 ~/.ssh/config 2>/dev/null || true
+                chmod 644 ~/.ssh/known_hosts 2>/dev/null || true
+                chmod 600 ~/.ssh/authorized_keys 2>/dev/null || true
             fi
             ;;
         linux)
-            eval "$perm_cmd"
+            chmod 644 ~/.gitconfig 2>/dev/null || true
+            chmod 644 ~/.gitignore_global 2>/dev/null || true
+            chmod 700 ~/.ssh 2>/dev/null || true
+            find ~/.ssh -type f -name 'id_*' ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+            find ~/.ssh -type f -name '*_rsa' ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+            find ~/.ssh -type f -name '*_ed25519' ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+            find ~/.ssh -type f -name '*_ecdsa' ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+            find ~/.ssh -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true
+            chmod 600 ~/.ssh/config 2>/dev/null || true
+            chmod 644 ~/.ssh/known_hosts 2>/dev/null || true
+            chmod 600 ~/.ssh/authorized_keys 2>/dev/null || true
             ;;
         windows)
             warn "Windows permissions are different from Unix"
