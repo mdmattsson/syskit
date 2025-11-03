@@ -1,7 +1,7 @@
 #!/bin/bash
 # Transfer Git config and SSH files between machines, WSL, and Windows
 # Supports local and remote Windows, WSL, and Linux systems
-# Usage: ./transfer-ssh.sh --from SOURCE --to DESTINATION [options]
+# Usage: ./transfer-ssh.sh [--from SOURCE] --to DESTINATION [options]
 
 set -e
 
@@ -314,6 +314,7 @@ detect_windows_user() {
 detect_remote_windows_user() {
     local ssh_host="$1"
     local user_var="$2"
+    local ssh_opts_type="$3"  # "from" or "to"
     local current_user
     
     eval "current_user=\$$user_var"
@@ -323,10 +324,15 @@ detect_remote_windows_user() {
         return
     fi
     
-    # Try to get username from remote Windows
-    current_user=$(ssh $(get_ssh_opts) "$ssh_host" "echo %USERNAME%" 2>/dev/null | tr -d '\r\n' || true)
+    # Try to get username from remote Windows (works with both PowerShell and cmd.exe)
+    current_user=$(ssh $(get_ssh_opts "$ssh_opts_type") "$ssh_host" "echo \$env:USERNAME" | tr -d '\r\n' || true)
     
-    if [[ -n "$current_user" && "$current_user" != "%USERNAME%" ]]; then
+    if [[ -z "$current_user" || "$current_user" == '$env:USERNAME' ]]; then
+        # Fallback to cmd.exe style
+        current_user=$(ssh $(get_ssh_opts "$ssh_opts_type") "$ssh_host" "echo %USERNAME%" | tr -d '\r\n' || true)
+    fi
+    
+    if [[ -n "$current_user" && "$current_user" != "%USERNAME%" && "$current_user" != '$env:USERNAME' ]]; then
         eval "$user_var='$current_user'"
         log "Auto-detected remote Windows user: $current_user"
         return
@@ -376,7 +382,7 @@ setup_paths() {
             SRC_GITIGNORE="\$HOME/.gitignore_global"
             ;;
         remote-windows)
-            detect_remote_windows_user "$FROM_SSH_HOST" "FROM_WIN_USER"
+            detect_remote_windows_user "$FROM_SSH_HOST" "FROM_WIN_USER" "from"
             # Windows OpenSSH uses forward slashes
             SRC_SSH="C:/Users/$FROM_WIN_USER/.ssh"
             SRC_GITCONFIG="C:/Users/$FROM_WIN_USER/.gitconfig"
@@ -413,7 +419,7 @@ setup_paths() {
             DST_GITIGNORE="\$HOME/.gitignore_global"
             ;;
         remote-windows)
-            detect_remote_windows_user "$TO_SSH_HOST" "TO_WIN_USER"
+            detect_remote_windows_user "$TO_SSH_HOST" "TO_WIN_USER" "to"
             # Windows OpenSSH uses forward slashes
             DST_SSH="C:/Users/$TO_WIN_USER/.ssh"
             DST_GITCONFIG="C:/Users/$TO_WIN_USER/.gitconfig"
@@ -438,19 +444,24 @@ setup_ssh_connection() {
     local host="$1"
     local control_path="$2"
     
-    log "Setting up SSH connection to $host..."
+    log "Setting up persistent SSH connection to $host..."
+    info "This will allow reusing the connection for multiple transfers"
     
     mkdir -p "$(dirname "$control_path")"
     
-    ssh -o ControlMaster=yes \
+    # Start master connection (may prompt for password if not using keys)
+    # Don't suppress stderr so password prompts are visible
+    if ssh -o ControlMaster=yes \
         -o ControlPath="$control_path" \
         -o ControlPersist=10m \
-        -fN "$host" 2>/dev/null || {
-        warn "Could not establish SSH master connection to $host"
+        -fN "$host"; then
+        log "Persistent SSH connection established (will reuse for all transfers)"
+        return 0
+    else
+        warn "Could not establish SSH master connection (multiplexing disabled)"
+        warn "Each file may prompt for authentication separately"
         return 1
-    }
-    
-    log "SSH connection established to $host"
+    fi
 }
 
 cleanup_ssh() {
@@ -480,15 +491,17 @@ check_ssh_connection() {
     
     log "Testing SSH connection to $host..."
     
-    if ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" exit 2>/dev/null; then
+    # Try without BatchMode to allow password auth (don't suppress stderr for password prompts)
+    if ssh -o ConnectTimeout=5 "$host" exit; then
         log "SSH connection successful"
-        setup_ssh_connection "$host" "$control_path"
+        # Try to set up master connection (may prompt for password once more)
+        setup_ssh_connection "$host" "$control_path" || warn "Continuing without SSH multiplexing"
         return 0
     else
         error "Cannot connect to $host via SSH"
         error "Please check:"
         echo "  1. Host is reachable"
-        echo "  2. SSH keys are set up"
+        echo "  2. SSH keys are set up (or password authentication is enabled)"
         echo "  3. SSH daemon is running on target"
         exit 1
     fi
@@ -998,9 +1011,8 @@ main() {
         warn "DRY RUN MODE - No files will be transferred"
     fi
     
-    setup_paths
-    
-    # Check SSH connectivity if needed
+    # Check SSH connectivity FIRST and set up multiplexing
+    # This way setup_paths can reuse the connection
     case "$FROM_TYPE" in
         remote-*) check_ssh_connection "$FROM_SSH_HOST" "$SSH_FROM_CONTROL_PATH" ;;
     esac
@@ -1008,6 +1020,9 @@ main() {
     case "$TO_TYPE" in
         remote-*) check_ssh_connection "$TO_SSH_HOST" "$SSH_TO_CONTROL_PATH" ;;
     esac
+    
+    # Now setup paths (this may SSH to detect Windows username, but will use multiplexed connection)
+    setup_paths
     
     create_backup
     transfer_git_config
