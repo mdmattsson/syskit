@@ -557,11 +557,11 @@ remote_exec() {
             ssh $(get_ssh_opts "$ssh_opts_type") "$ssh_host" "powershell.exe -Command \"$ps_command\""
             ;;
         remote-wsl)
-            # Execute in WSL on remote Windows
+            # Execute in WSL on remote Windows (OpenSSH uses PowerShell, so use double quotes)
             if [[ -n "$distro" ]]; then
-                ssh $(get_ssh_opts "$ssh_opts_type") "$ssh_host" "wsl.exe -d $distro bash -c '$command'"
+                ssh $(get_ssh_opts "$ssh_opts_type") "$ssh_host" "wsl.exe -d $distro bash -c \"$command\""
             else
-                ssh $(get_ssh_opts "$ssh_opts_type") "$ssh_host" "wsl.exe bash -c '$command'"
+                ssh $(get_ssh_opts "$ssh_opts_type") "$ssh_host" "wsl.exe bash -c \"$command\""
             fi
             ;;
     esac
@@ -741,10 +741,30 @@ write_to_destination() {
             esac
             ;;
         remote-wsl)
+            # For remote WSL through Windows OpenSSH (PowerShell), use proper PowerShell quoting
+            # PowerShell needs: wsl.exe -d distro bash -c "cat > file"
             case "$file" in
-                gitconfig) echo "$content" | remote_exec "$TO_TYPE" "$TO_SSH_HOST" "$TO_DISTRO" "cat > ~/.gitconfig" "to" ;;
-                gitignore) echo "$content" | remote_exec "$TO_TYPE" "$TO_SSH_HOST" "$TO_DISTRO" "cat > ~/.gitignore_global" "to" ;;
-                *) echo "$content" | remote_exec "$TO_TYPE" "$TO_SSH_HOST" "$TO_DISTRO" "cat > ~/.ssh/$file" "to" ;;
+                gitconfig)
+                    if [[ -n "$TO_DISTRO" ]]; then
+                        echo "$content" | ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO bash -c \"cat > ~/.gitconfig\""
+                    else
+                        echo "$content" | ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe bash -c \"cat > ~/.gitconfig\""
+                    fi
+                    ;;
+                gitignore)
+                    if [[ -n "$TO_DISTRO" ]]; then
+                        echo "$content" | ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO bash -c \"cat > ~/.gitignore_global\""
+                    else
+                        echo "$content" | ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe bash -c \"cat > ~/.gitignore_global\""
+                    fi
+                    ;;
+                *)
+                    if [[ -n "$TO_DISTRO" ]]; then
+                        echo "$content" | ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO bash -c \"cat > ~/.ssh/$file\""
+                    else
+                        echo "$content" | ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe bash -c \"cat > ~/.ssh/$file\""
+                    fi
+                    ;;
             esac
             ;;
     esac
@@ -1070,6 +1090,21 @@ main() {
     case "$TO_TYPE" in
         remote-*) check_ssh_connection "$TO_SSH_HOST" "$SSH_TO_CONTROL_PATH" ;;
     esac
+    
+    # Verify remote WSL distro exists if needed
+    if [[ "$TO_TYPE" == "remote-wsl" && -n "$TO_DISTRO" ]]; then
+        log "Verifying WSL distribution '$TO_DISTRO' exists on remote host..."
+        if ! ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -l -q" 2>/dev/null | grep -qi "$TO_DISTRO"; then
+            error "WSL distribution '$TO_DISTRO' not found on remote host"
+            echo ""
+            echo "Available distributions:"
+            ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -l -q" 2>/dev/null || echo "  (Could not list distributions)"
+            echo ""
+            echo "Hint: Distribution names are case-sensitive"
+            exit 1
+        fi
+        log "WSL distribution '$TO_DISTRO' verified"
+    fi
     
     # Now setup paths (this may SSH to detect Windows username, but will use multiplexed connection)
     setup_paths
