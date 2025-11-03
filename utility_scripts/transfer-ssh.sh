@@ -1094,11 +1094,15 @@ main() {
     # Verify remote WSL distro exists if needed
     if [[ "$TO_TYPE" == "remote-wsl" && -n "$TO_DISTRO" ]]; then
         log "Verifying WSL distribution '$TO_DISTRO' exists on remote host..."
-        if ! ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -l -q" 2>/dev/null | grep -qi "$TO_DISTRO"; then
+        # wsl.exe -l -q outputs UTF-16, need to handle it properly
+        # Get list, convert to ASCII, remove null bytes and carriage returns
+        local distro_list=$(ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -l -q" 2>/dev/null | tr -d '\000\r')
+        
+        if ! echo "$distro_list" | grep -qx "$TO_DISTRO"; then
             error "WSL distribution '$TO_DISTRO' not found on remote host"
             echo ""
             echo "Available distributions:"
-            ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -l -q" 2>/dev/null || echo "  (Could not list distributions)"
+            echo "$distro_list"
             echo ""
             echo "Hint: Distribution names are case-sensitive"
             exit 1
