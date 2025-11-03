@@ -761,37 +761,43 @@ create_backup() {
     
     local backup_suffix=".backup-$(date +%Y%m%d-%H%M%S)"
     
-    local backup_cmd="
-        [[ -f ~/.gitconfig ]] && cp ~/.gitconfig ~/.gitconfig$backup_suffix 2>/dev/null || true
-        [[ -f ~/.gitignore_global ]] && cp ~/.gitignore_global ~/.gitignore_global$backup_suffix 2>/dev/null || true
-        [[ -d ~/.ssh ]] && cp -r ~/.ssh ~/.ssh$backup_suffix 2>/dev/null || true
-    "
-    
-    local win_backup_cmd="
-        if exist C:\\Users\\%USERNAME%\\.gitconfig copy C:\\Users\\%USERNAME%\\.gitconfig C:\\Users\\%USERNAME%\\.gitconfig$backup_suffix
-        if exist C:\\Users\\%USERNAME%\\.ssh xcopy C:\\Users\\%USERNAME%\\.ssh C:\\Users\\%USERNAME%\\.ssh$backup_suffix /E /I /Q
-    "
-    
     case "$TO_TYPE" in
         remote-linux)
-            remote_exec "$TO_TYPE" "$TO_SSH_HOST" "" "$backup_cmd" "to" || true
+            # For remote Linux, use simple commands
+            ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "test -f ~/.gitconfig && cp ~/.gitconfig ~/.gitconfig$backup_suffix" 2>/dev/null || true
+            ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "test -f ~/.gitignore_global && cp ~/.gitignore_global ~/.gitignore_global$backup_suffix" 2>/dev/null || true
+            ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "test -d ~/.ssh && cp -r ~/.ssh ~/.ssh$backup_suffix" 2>/dev/null || true
             ;;
         remote-windows)
-            # Windows doesn't handle bash commands well, skip backup or use PowerShell
             warn "Skipping backup on remote Windows (implement PowerShell commands if needed)"
             ;;
         remote-wsl)
-            remote_exec "$TO_TYPE" "$TO_SSH_HOST" "$TO_DISTRO" "$backup_cmd" "to" || true
+            # For remote WSL, break down into individual simple commands to avoid quoting hell
+            if [[ -n "$TO_DISTRO" ]]; then
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO test -f ~/.gitconfig && wsl.exe -d $TO_DISTRO cp ~/.gitconfig ~/.gitconfig$backup_suffix" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO test -f ~/.gitignore_global && wsl.exe -d $TO_DISTRO cp ~/.gitignore_global ~/.gitignore_global$backup_suffix" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe -d $TO_DISTRO test -d ~/.ssh && wsl.exe -d $TO_DISTRO cp -r ~/.ssh ~/.ssh$backup_suffix" 2>/dev/null || true
+            else
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe test -f ~/.gitconfig && wsl.exe cp ~/.gitconfig ~/.gitconfig$backup_suffix" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe test -f ~/.gitignore_global && wsl.exe cp ~/.gitignore_global ~/.gitignore_global$backup_suffix" 2>/dev/null || true
+                ssh $(get_ssh_opts "to") "$TO_SSH_HOST" "wsl.exe test -d ~/.ssh && wsl.exe cp -r ~/.ssh ~/.ssh$backup_suffix" 2>/dev/null || true
+            fi
             ;;
         wsl)
             if [[ -n "$TO_DISTRO" ]]; then
-                wsl.exe -d "$TO_DISTRO" bash -c "$backup_cmd" || true
+                wsl.exe -d "$TO_DISTRO" bash -c "test -f ~/.gitconfig && cp ~/.gitconfig ~/.gitconfig$backup_suffix" 2>/dev/null || true
+                wsl.exe -d "$TO_DISTRO" bash -c "test -f ~/.gitignore_global && cp ~/.gitignore_global ~/.gitignore_global$backup_suffix" 2>/dev/null || true
+                wsl.exe -d "$TO_DISTRO" bash -c "test -d ~/.ssh && cp -r ~/.ssh ~/.ssh$backup_suffix" 2>/dev/null || true
             else
-                eval "$backup_cmd" || true
+                [[ -f ~/.gitconfig ]] && cp ~/.gitconfig ~/.gitconfig$backup_suffix 2>/dev/null || true
+                [[ -f ~/.gitignore_global ]] && cp ~/.gitignore_global ~/.gitignore_global$backup_suffix 2>/dev/null || true
+                [[ -d ~/.ssh ]] && cp -r ~/.ssh ~/.ssh$backup_suffix 2>/dev/null || true
             fi
             ;;
         linux)
-            eval "$backup_cmd" || true
+            [[ -f ~/.gitconfig ]] && cp ~/.gitconfig ~/.gitconfig$backup_suffix 2>/dev/null || true
+            [[ -f ~/.gitignore_global ]] && cp ~/.gitignore_global ~/.gitignore_global$backup_suffix 2>/dev/null || true
+            [[ -d ~/.ssh ]] && cp -r ~/.ssh ~/.ssh$backup_suffix 2>/dev/null || true
             ;;
         windows)
             [[ -f "$DST_GITCONFIG" ]] && cp "$DST_GITCONFIG" "$DST_GITCONFIG$backup_suffix" 2>/dev/null || true
