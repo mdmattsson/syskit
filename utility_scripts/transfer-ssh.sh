@@ -723,19 +723,20 @@ write_to_destination() {
             esac
             ;;
         remote-windows)
-            # For Windows, we need to use PowerShell to write files from stdin
+            # For Windows, use PowerShell's Console.In to read from stdin
+            # This avoids complex quoting issues with $input variable
             case "$file" in
                 gitconfig) 
                     echo "$content" | ssh $(get_ssh_opts "to") "$TO_SSH_HOST" \
-                        "powershell.exe -Command \"\\\$input | Set-Content -Path '$DST_GITCONFIG' -NoNewline\""
+                        "powershell.exe -Command \"[Console]::In.ReadToEnd() | Set-Content -Path '$DST_GITCONFIG' -NoNewline\""
                     ;;
                 gitignore) 
                     echo "$content" | ssh $(get_ssh_opts "to") "$TO_SSH_HOST" \
-                        "powershell.exe -Command \"\\\$input | Set-Content -Path '$DST_GITIGNORE' -NoNewline\""
+                        "powershell.exe -Command \"[Console]::In.ReadToEnd() | Set-Content -Path '$DST_GITIGNORE' -NoNewline\""
                     ;;
                 *) 
                     echo "$content" | ssh $(get_ssh_opts "to") "$TO_SSH_HOST" \
-                        "powershell.exe -Command \"\\\$input | Set-Content -Path '$DST_SSH/$file' -NoNewline\""
+                        "powershell.exe -Command \"[Console]::In.ReadToEnd() | Set-Content -Path '$DST_SSH/$file' -NoNewline\""
                     ;;
             esac
             ;;
